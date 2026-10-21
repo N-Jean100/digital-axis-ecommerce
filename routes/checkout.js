@@ -27,6 +27,12 @@ function customerOnly(req, res, next) {
   return next();
 }
 
+function publicOrder(order) {
+  if (!order) return order;
+  const { customer, stripeSessionId, providerReference, __v, ...safeOrder } = order;
+  return safeOrder;
+}
+
 function sendPaymentError(res, error) {
   if (error.code === 'PAYMENT_PROVIDER_NOT_CONFIGURED') {
     return res.status(error.statusCode || 503).json({
@@ -108,7 +114,7 @@ router.post('/orders', verifyToken, customerOnly, async (req, res) => {
       });
       await Order.updateOne({ _id: order._id }, { $set: { stripeSessionId: session.id } });
       return res.status(201).json({
-        order: await Order.findById(order._id).select('-customer -__v -stripeSessionId -providerReference').lean(),
+        order: publicOrder(await Order.findById(order._id).lean()),
         checkoutUrl: session.url
       });
     }
@@ -118,21 +124,25 @@ router.post('/orders', verifyToken, customerOnly, async (req, res) => {
     await startMtnRequest({ order, phone, referenceId });
     mtnRequestAccepted = true;
     return res.status(201).json({
-      order: await Order.findById(order._id).select('-customer -__v -stripeSessionId -providerReference').lean(),
+      order: publicOrder(await Order.findById(order._id).lean()),
       message: 'Payment request sent. Approve it on your phone; this order remains pending until MTN confirms payment.'
     });
   } catch (error) {
     if ((error.code === 'MTN_REQUEST_UNCERTAIN' || mtnRequestAccepted) && order?._id) {
       return res.status(202).json({
-        order: await Order.findById(order._id).select('-customer -__v -stripeSessionId -providerReference').lean(),
+        order: publicOrder(await Order.findById(order._id).lean()),
         message: 'The payment request may be active. The order remains pending while MTN status is checked.'
       });
     }
     if (order?._id && order.paymentStatus === 'pending') {
-      await Order.updateOne(
-        { _id: order._id, paymentStatus: 'pending' },
-        { $set: { paymentStatus: 'failed', failureCode: 'PAYMENT_REQUEST_FAILED' } }
-      ).catch(() => {});
+      try {
+        await Order.updateOne(
+          { _id: order._id, paymentStatus: 'pending' },
+          { $set: { paymentStatus: 'failed', failureCode: 'PAYMENT_REQUEST_FAILED' } }
+        );
+      } catch (updateError) {
+        console.error('Could not mark failed checkout order:', updateError.code || updateError.name || 'database error');
+      }
     }
     return sendPaymentError(res, error);
   }
@@ -168,7 +178,7 @@ router.get('/orders/:orderId', verifyToken, customerOnly, async (req, res) => {
         order = await applyProviderStatus(order, providerStatus);
       }
     }
-    return res.json({ order });
+    return res.json({ order: publicOrder(order) });
   } catch {
     return res.status(502).json({
       code: 'PAYMENT_STATUS_UNAVAILABLE',

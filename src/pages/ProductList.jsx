@@ -27,7 +27,7 @@ function ProductCard({ product, index, onContactSeller, canMessageSeller, onAddT
             type="button"
             onClick={() => onAddToCart(product)}
             disabled={Number(product.stock) < 1}
-            className="primary-action-button mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-[11px] font-semibold transition hover:-translate-y-0.5 disabled:translate-y-0"
+            className="primary-action-button mt-3 inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-[13px] font-semibold transition hover:-translate-y-0.5 disabled:translate-y-0"
           >
             <Icon name="plus" size={14} /> {Number(product.stock) < 1 ? 'Out of stock' : 'Add to cart'}
           </button>

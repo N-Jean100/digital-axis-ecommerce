@@ -1,6 +1,6 @@
 import { Icon } from './icons.jsx';
 
-function ProductCard({ product, index, onContactSeller, canMessageSeller }) {
+function ProductCard({ product, index, onContactSeller, canMessageSeller, onAddToCart, canPurchase }) {
   return (
     <article className="product-card overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--panel)]" style={{ animationDelay: `${Math.min(index, 8) * 45}ms` }}>
       <div className="image-stage relative grid h-[176px] place-items-center overflow-hidden">
@@ -22,6 +22,16 @@ function ProductCard({ product, index, onContactSeller, canMessageSeller }) {
           <span className={`font-semibold ${Number(product.stock) <= 0 ? 'text-[#a45438]' : 'text-[var(--ink)]'}`}>{Number.isFinite(Number(product.stock)) ? Number(product.stock).toLocaleString() : '—'}</span>
         </div>
         {product.location && <p className="mt-2 text-[10px] text-[var(--muted)]">Available in {product.location}</p>}
+        {canPurchase && (
+          <button
+            type="button"
+            onClick={() => onAddToCart(product)}
+            disabled={Number(product.stock) < 1}
+            className="primary-action-button mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-[11px] font-semibold transition hover:-translate-y-0.5 disabled:translate-y-0"
+          >
+            <Icon name="plus" size={14} /> {Number(product.stock) < 1 ? 'Out of stock' : 'Add to cart'}
+          </button>
+        )}
         {canMessageSeller && product.vendor?._id && (
           <button
             type="button"
@@ -36,7 +46,7 @@ function ProductCard({ product, index, onContactSeller, canMessageSeller }) {
   );
 }
 
-function ProductList({ products = [], loading, error, onRetry, onAddProduct, onContactSeller, userRole, query, onQueryChange, category, onCategoryChange, categories = [], title, subtitle, showFilters }) {
+function ProductList({ products = [], loading, error, onRetry, onAddProduct, onAddToCart, onContactSeller, userRole, query, onQueryChange, category, onCategoryChange, categories = [], title, subtitle, showFilters }) {
   return (
     <section aria-labelledby="product-list-title">
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
@@ -78,7 +88,7 @@ function ProductList({ products = [], loading, error, onRetry, onAddProduct, onC
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {products.map((product, index) => <div className="reveal" key={product._id || `${product.name}-${index}`}><ProductCard product={product} index={index} canMessageSeller={userRole === 'customer'} onContactSeller={onContactSeller} /></div>)}
+          {products.map((product, index) => <div className="reveal" key={product._id || `${product.name}-${index}`}><ProductCard product={product} index={index} canMessageSeller={userRole === 'customer'} canPurchase={userRole === 'customer'} onAddToCart={onAddToCart} onContactSeller={onContactSeller} /></div>)}
         </div>
       )}
     </section>

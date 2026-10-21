@@ -10,6 +10,8 @@ const connectDB = require('./config/db.js');
 const JWT_SECRET = require('./config/jwt');
 const Conversation = require('./models/Conversation');
 const mongoose = require('mongoose');
+const checkoutRoutes = require('./routes/checkout');
+const { handleStripeWebhook } = checkoutRoutes;
 
 const app = express();
 const server = http.createServer(app);
@@ -23,7 +25,10 @@ const io = new Server(server, {
 });
 const activeCalls = new Map();
 
-// Middlewares
+// Stripe requires the exact raw request bytes for signature verification.
+app.post('/api/checkout/stripe/webhook', express.raw({ type: 'application/json', limit: '1mb' }), handleStripeWebhook);
+
+// Middleware
 app.use(express.json({ limit: '5mb' }));
 app.use(cors());
 
@@ -40,6 +45,8 @@ app.use('/api/auth', authRoutes);
 
 const messageRoutes = require('./routes/messages');
 app.use('/api/messages', messageRoutes);
+
+app.use('/api/checkout', checkoutRoutes.router);
 
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token;

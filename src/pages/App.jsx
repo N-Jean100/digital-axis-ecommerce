@@ -5,12 +5,14 @@ import ProductList from './ProductList.jsx';
 import Messages from './Messages.jsx';
 import AuthEntry from './AuthEntry.jsx';
 import ChatWidget from './ChatWidget.jsx';
+import CartCheckout from './CartCheckout.jsx';
 import { Icon } from './icons.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 const PRODUCTS_URL = `${API_URL}/products`;
 const SETTINGS_KEY = 'digital-axis-settings';
 const NOTIFICATIONS_KEY = 'digital-axis-notifications';
+const CART_STORAGE_PREFIX = 'digital-axis-cart-';
 
 function readStorage(key, fallback) {
   try {
@@ -25,13 +27,16 @@ function getErrorMessage(error, fallback) {
   return error.response?.data?.message || error.message || fallback;
 }
 
-function Sidebar({ activeView, onNavigate, apiStatus, user }) {
+function Sidebar({ activeView, onNavigate, apiStatus, user, cartCount }) {
   const links = [
     { id: 'overview', label: 'Overview', icon: 'grid' },
     { id: 'products', label: 'Products', icon: 'box' },
   ];
   if (user?.role === 'customer' || user?.role === 'vendor') {
     links.splice(2, 0, { id: 'messages', label: 'Messages', icon: 'users' });
+  }
+  if (user?.role === 'customer') {
+    links.splice(2, 0, { id: 'cart', label: 'Cart', icon: 'box' });
   }
   if (user?.role === 'vendor' || user?.role === 'admin') {
     links.push({ id: 'add-product', label: 'Add product', icon: 'plus' });
@@ -53,6 +58,7 @@ function Sidebar({ activeView, onNavigate, apiStatus, user }) {
           <button className={`nav-link rounded-xl px-3 py-3 text-[13px] ${activeView === link.id ? 'is-active' : ''}`} key={link.id} onClick={() => onNavigate(link.id)} aria-current={activeView === link.id ? 'page' : undefined}>
             <Icon className="nav-icon" name={link.icon} />
             <span className="nav-copy">{link.label}</span>
+            {link.id === 'cart' && cartCount > 0 && <span className="nav-copy ml-auto rounded-full bg-[var(--lime)] px-2 py-0.5 text-[10px] font-bold text-[#17210d]">{cartCount}</span>}
             {link.id === 'add-product' && <span className="nav-copy ml-auto text-[10px] text-[var(--muted)]">NEW</span>}
           </button>
         ))}
@@ -220,8 +226,15 @@ function PageHeading({ eyebrow, title, description, action }) {
 }
 
 function Dashboard({ onLogout, user }) {
-  const [activeView, setActiveView] = useState('overview');
+  const [activeView, setActiveView] = useState(() => new URLSearchParams(window.location.search).has('checkout') ? 'cart' : 'overview');
   const [products, setProducts] = useState([]);
+  const [cartItems, setCartItems] = useState(() => {
+    const stored = readStorage(`${CART_STORAGE_PREFIX}${user?.id || 'guest'}`, []);
+    return Array.isArray(stored)
+      ? stored.filter((item) => typeof item?.productId === 'string'
+        && Number.isInteger(item.quantity) && item.quantity > 0 && item.quantity <= 10)
+      : [];
+  });
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [productsError, setProductsError] = useState('');
   const [settings, setSettings] = useState(() => ({ theme: 'dark', reducedMotion: false, compact: false, ...readStorage(SETTINGS_KEY, {}) }));
@@ -258,6 +271,9 @@ function Dashboard({ onLogout, user }) {
   useEffect(() => {
     try { localStorage.setItem(NOTIFICATIONS_KEY, JSON.stringify(notifications)); } catch { /* Notifications remain usable for this session. */ }
   }, [notifications]);
+  useEffect(() => {
+    try { localStorage.setItem(`${CART_STORAGE_PREFIX}${user?.id || 'guest'}`, JSON.stringify(cartItems)); } catch { /* The cart remains available for this session. */ }
+  }, [cartItems, user?.id]);
 
   const filteredProducts = useMemo(() => products.filter((product) => {
     const matchesCategory = category === 'all' || product.category === category;
@@ -283,9 +299,38 @@ function Dashboard({ onLogout, user }) {
     pushNotification('Product added', message || 'Your product was added to the catalog.');
     setActiveView('products');
   }, [loadProducts, pushNotification]);
+  const addToCart = useCallback((product) => {
+    const availableStock = Number(product.stock);
+    if (!product?._id || !Number.isFinite(availableStock) || availableStock < 1) {
+      reportError('Item unavailable', 'This product is currently out of stock.');
+      return;
+    }
+    const existing = cartItems.find((item) => item.productId === product._id);
+    if (existing && existing.quantity >= Math.min(10, availableStock)) {
+      reportError('Quantity limit reached', 'The cart quantity cannot exceed the stock currently shown.');
+      return;
+    }
+    setCartItems((items) => existing
+      ? items.map((item) => item.productId === product._id ? { ...item, quantity: item.quantity + 1 } : item)
+      : [...items, { productId: product._id, quantity: 1 }]);
+    if (!existing) {
+      pushNotification('Added to cart', `${product.name} is in your cart. The server will verify price and stock at checkout.`);
+    }
+  }, [cartItems, pushNotification, reportError]);
+  const updateCartQuantity = (productId, quantity) => {
+    if (quantity < 1) {
+      setCartItems((items) => items.filter((item) => item.productId !== productId));
+      return;
+    }
+    setCartItems((items) => items.map((item) => item.productId === productId
+      ? { ...item, quantity: Math.min(10, quantity) }
+      : item));
+  };
+  const removeCartItem = (productId) => setCartItems((items) => items.filter((item) => item.productId !== productId));
   const handleNavigate = (view) => {
     if (view === 'admin' && user?.role !== 'admin') return;
     if (view === 'add-product' && user?.role !== 'vendor' && user?.role !== 'admin') return;
+    if (view === 'cart' && user?.role !== 'customer') return;
     setActiveView(view);
     setNotificationsOpen(false);
     if (view === 'overview') { setQuery(''); setCategory('all'); }
@@ -297,12 +342,13 @@ function Dashboard({ onLogout, user }) {
   };
 
   const canManageProducts = user?.role === 'vendor' || user?.role === 'admin';
+  const cartCount = cartItems.reduce((total, item) => total + item.quantity, 0);
   const productAction = canManageProducts ? <button onClick={() => handleNavigate('add-product')} className="primary-action-button inline-flex items-center gap-2 rounded-xl px-4 py-3 text-[12px] font-semibold transition hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none"><Icon name="plus" size={16} /> Add a product</button> : undefined;
   const visibleProductsCount = products.length;
   const apiStatus = loadingProducts ? 'Syncing' : productsError ? 'Unavailable' : 'Connected';
   return (
     <div className={`app-shell flex min-h-screen ${settings.compact ? 'compact-density' : ''}`}>
-      <Sidebar activeView={activeView} onNavigate={handleNavigate} apiStatus={apiStatus} user={user} />
+      <Sidebar activeView={activeView} onNavigate={handleNavigate} apiStatus={apiStatus} user={user} cartCount={cartCount} />
       <div className="main-area flex min-h-screen flex-1 flex-col">
         <Topbar activeView={activeView} notifications={notifications} notificationsOpen={notificationsOpen} onToggleNotifications={() => setNotificationsOpen((open) => !open)} onSettings={() => setSettingsOpen(true)} onMarkRead={(id) => setNotifications((items) => items.map((item) => item.id === id ? { ...item, read: true } : item))} onDismiss={(id) => setNotifications((items) => items.filter((item) => item.id !== id))} onClear={() => setNotifications([])} apiStatus={apiStatus} onAdmin={() => handleNavigate('admin')} onLogout={onLogout} user={user} />
         <main key={activeView} className="content-wrap page-enter flex-1 px-9 py-9 max-sm:py-7">
@@ -325,7 +371,7 @@ function Dashboard({ onLogout, user }) {
                   <div className="mt-5 flex items-center justify-between border-t border-[var(--line)] pt-4 text-[11px]"><span className="text-[var(--muted)]">{productsError ? 'Service response' : 'Live catalog items'}</span><span className="font-semibold">{productsError ? 'Check connection' : loadingProducts ? 'Loading…' : visibleProductsCount}</span></div>
                 </section>
               </div>
-              <ProductList products={filteredProducts} loading={loadingProducts} error={productsError} onRetry={loadProducts} onAddProduct={canManageProducts ? () => handleNavigate('add-product') : undefined} onContactSeller={handleContactSeller} userRole={user?.role} query={query} onQueryChange={setQuery} category={category} onCategoryChange={setCategory} categories={categories} title="Your products" subtitle="A live view of the items available in your catalog." showFilters={false} />
+              <ProductList products={filteredProducts} loading={loadingProducts} error={productsError} onRetry={loadProducts} onAddProduct={canManageProducts ? () => handleNavigate('add-product') : undefined} onAddToCart={addToCart} onContactSeller={handleContactSeller} userRole={user?.role} query={query} onQueryChange={setQuery} category={category} onCategoryChange={setCategory} categories={categories} title="Your products" subtitle="A live view of the items available in your catalog." showFilters={false} />
             </>
           )}
           {activeView === 'products' && (
@@ -336,7 +382,7 @@ function Dashboard({ onLogout, user }) {
                 <div className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] px-4 py-4"><div className="text-[10px] font-semibold uppercase tracking-[.13em] text-[var(--muted)]">Categories</div><div className="mt-2 text-[23px] font-semibold tracking-[-.04em]">{loadingProducts ? '—' : categories.length}</div></div>
                 <div className="col-span-2 rounded-2xl border border-[var(--line)] bg-[var(--panel)] px-4 py-4 sm:col-span-1"><div className="text-[10px] font-semibold uppercase tracking-[.13em] text-[var(--muted)]">API status</div><div className="mt-2 flex items-center gap-2 text-[13px] font-semibold"><span className={`status-dot ${productsError ? '!bg-[#db744d]' : ''}`} />{loadingProducts ? 'Syncing' : productsError ? 'Unavailable' : 'Connected'}</div></div>
               </div>
-              <ProductList products={filteredProducts} loading={loadingProducts} error={productsError} onRetry={loadProducts} onAddProduct={canManageProducts ? () => handleNavigate('add-product') : undefined} onContactSeller={handleContactSeller} userRole={user?.role} query={query} onQueryChange={setQuery} category={category} onCategoryChange={setCategory} categories={categories} title="All products" subtitle="Use search and category filters to find an item." showFilters />
+              <ProductList products={filteredProducts} loading={loadingProducts} error={productsError} onRetry={loadProducts} onAddProduct={canManageProducts ? () => handleNavigate('add-product') : undefined} onAddToCart={addToCart} onContactSeller={handleContactSeller} userRole={user?.role} query={query} onQueryChange={setQuery} category={category} onCategoryChange={setCategory} categories={categories} title="All products" subtitle="Use search and category filters to find an item." showFilters />
             </>
           )}
           {activeView === 'add-product' && (
@@ -344,6 +390,16 @@ function Dashboard({ onLogout, user }) {
               <PageHeading eyebrow="Catalog management" title="Add a product" description="Share the details your customers need to discover what you offer." />
               <AddProduct onSuccess={handleProductAdded} onError={(message) => reportError('Could not add product', message)} />
             </div>
+          )}
+          {activeView === 'cart' && user?.role === 'customer' && (
+            <CartCheckout
+              cartItems={cartItems}
+              products={products}
+              onQuantityChange={updateCartQuantity}
+              onRemove={removeCartItem}
+              onClear={() => setCartItems([])}
+              onBrowse={() => handleNavigate('products')}
+            />
           )}
           {activeView === 'admin' && user?.role === 'admin' && (
             <>
@@ -371,7 +427,7 @@ function Dashboard({ onLogout, user }) {
           <footer className="mt-14 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--line)] py-5 text-[10px] text-[var(--muted)]"><span>© {new Date().getFullYear()} DIGITAL Axis · Commerce workspace</span><span className="flex items-center gap-2"><span className={`status-dot ${apiStatus === 'Unavailable' ? '!bg-[#db744d]' : ''}`} /> {apiStatus === 'Unavailable' ? 'Catalog service unavailable' : `${apiStatus} to catalog`}</span></footer>
         </main>
         <nav className="mobile-nav sticky bottom-0 z-30 hidden justify-around border-t border-[var(--line)] bg-[var(--panel)] px-2 py-2" aria-label="Mobile navigation">
-          {[{ id: 'overview', label: 'Home', icon: 'grid' }, { id: 'products', label: 'Products', icon: 'box' }, ...(user?.role === 'customer' || user?.role === 'vendor' ? [{ id: 'messages', label: 'Messages', icon: 'users' }] : []), ...(canManageProducts ? [{ id: 'add-product', label: 'Add', icon: 'plus' }] : [])].map((link) => <button key={link.id} onClick={() => handleNavigate(link.id)} className={`flex min-w-[64px] flex-col items-center gap-1 rounded-xl px-3 py-1.5 text-[9px] ${activeView === link.id ? 'font-bold text-[var(--ink)]' : 'text-[var(--muted)]'}`} aria-current={activeView === link.id ? 'page' : undefined}><Icon name={link.icon} size={17} />{link.label}</button>)}
+          {[{ id: 'overview', label: 'Home', icon: 'grid' }, { id: 'products', label: 'Products', icon: 'box' }, ...(user?.role === 'customer' ? [{ id: 'cart', label: `Cart${cartCount ? ` · ${cartCount}` : ''}`, icon: 'box' }] : []), ...(user?.role === 'customer' || user?.role === 'vendor' ? [{ id: 'messages', label: 'Messages', icon: 'users' }] : []), ...(canManageProducts ? [{ id: 'add-product', label: 'Add', icon: 'plus' }] : [])].map((link) => <button key={link.id} onClick={() => handleNavigate(link.id)} className={`flex min-w-[64px] flex-col items-center gap-1 rounded-xl px-3 py-1.5 text-[9px] ${activeView === link.id ? 'font-bold text-[var(--ink)]' : 'text-[var(--muted)]'}`} aria-current={activeView === link.id ? 'page' : undefined}><Icon name={link.icon} size={17} />{link.label}</button>)}
         </nav>
       </div>
       {settingsOpen && <SettingsDialog settings={settings} onChange={setSettings} onClose={() => setSettingsOpen(false)} />}

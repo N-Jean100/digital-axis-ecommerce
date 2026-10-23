@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import axios from 'axios';
+import { Eye, EyeOff, LockKeyhole, Mail, UserRound } from 'lucide-react';
 import { Icon } from './icons.jsx';
 import { API_URL, getApiErrorMessage } from './api.js';
 
-function Register({ onSuccess, onSwitch }) {
+function Register({ onVerificationRequested, onSwitch }) {
   const [formData, setFormData] = useState({ name: '', email: '', password: '', role: 'customer' });
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleChange = (event) => setFormData((current) => ({ ...current, [event.target.name]: event.target.value }));
 
@@ -15,8 +17,8 @@ function Register({ onSuccess, onSwitch }) {
     setFormError('');
     setSubmitting(true);
     try {
-      const response = await axios.post(`${API_URL}/auth/register`, formData);
-      onSuccess(response.data);
+      await axios.post(`${API_URL}/auth/register`, formData);
+      onVerificationRequested(formData.email.trim().toLowerCase());
     } catch (error) {
       const message = getApiErrorMessage(error, 'We could not create your account. Please try again.');
       setFormError(message);
@@ -38,17 +40,17 @@ function Register({ onSuccess, onSwitch }) {
 
         <label className="auth-field">
           Izina (Name)
-          <input className="register-control" type="text" name="name" autoComplete="name" value={formData.name} onChange={handleChange} placeholder="Your name" required />
+          <span className="auth-input-wrap"><UserRound size={16} aria-hidden="true" /><input className="register-control" type="text" name="name" autoComplete="name" value={formData.name} onChange={handleChange} placeholder="Your name" required /></span>
         </label>
 
         <label className="auth-field">
           Email
-          <input className="register-control" type="email" name="email" autoComplete="email" value={formData.email} onChange={handleChange} placeholder="you@example.com" required />
+          <span className="auth-input-wrap"><Mail size={16} aria-hidden="true" /><input className="register-control" type="email" name="email" autoComplete="email" value={formData.email} onChange={handleChange} placeholder="you@example.com" required /></span>
         </label>
 
         <label className="auth-field">
           Ijambo ry'ibanga (Password)
-          <input className="register-control" type="password" name="password" autoComplete="new-password" minLength={8} maxLength={128} value={formData.password} onChange={handleChange} placeholder="At least 8 characters" required />
+          <span className="auth-input-wrap"><LockKeyhole size={16} aria-hidden="true" /><input className="register-control" type={showPassword ? 'text' : 'password'} name="password" autoComplete="new-password" minLength={8} maxLength={128} value={formData.password} onChange={handleChange} placeholder="At least 8 characters" required /><button className="auth-password-toggle" type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword((visible) => !visible)}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></span>
         </label>
 
         <label className="auth-field">

@@ -1,5 +1,22 @@
 # DIGITAL Axis
 
+## Account verification and recovery
+
+New accounts are created only after the emailed six-digit verification code is confirmed. Password recovery sends a short-lived code and does not reveal whether the supplied email belongs to an account. Codes expire after 10 minutes; resend requests are limited to one every 30 seconds.
+
+Configure email delivery in the backend environment before enabling registration or password recovery. Keep these values server-side and restart the backend after changing them:
+
+```dotenv
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USER=your-smtp-user
+SMTP_PASS=your-smtp-password
+SMTP_SECURE=false
+MAIL_FROM="DIGITAL Axis <no-reply@example.com>"
+```
+
+Alternatively, configure `SMTP_URL` instead of `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS`. `MAIL_FROM` is required in either configuration. Without valid mail settings, verification and recovery fail closed and no account is created.
+
 ## Product discovery assistant
 
 The floating **Ask Axis** assistant is available throughout the React app and answers from the live MongoDB product catalog. It can find in-stock items by name, category, description, or location and apply a maximum-price filter (for example, “under 10,000 RWF”). Product location is optional; vendors can add it when creating a product.
